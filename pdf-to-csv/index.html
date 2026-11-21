@@ -1,0 +1,57 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bank Statement PDF to CSV (Free, No Upload) | Statement2CSV</title><meta name="description" content="Turn a text-based statement PDF into CSV in your browser. Nothing is uploaded."><link rel="canonical" href="https://basileion.github.io/statement2csv/pdf-to-csv/">
+<meta property="og:title" content="Bank Statement PDF to CSV (Free, No Upload) | Statement2CSV"><meta property="og:description" content="Turn a text-based statement PDF into CSV in your browser. Nothing is uploaded."><meta property="og:url" content="https://basileion.github.io/statement2csv/pdf-to-csv/"><meta name="twitter:card" content="summary">
+<link rel="alternate" type="application/rss+xml" title="Statement2CSV changes" href="/statement2csv/changes/feed.xml"><link rel="stylesheet" href="/statement2csv/style.css"></head><body>
+<header><div class="w"><a class="brand" href="/statement2csv/">Statement<span>2CSV</span></a><nav><a href="/statement2csv/">Converter</a><a href="/statement2csv/quickbooks-csv/">QuickBooks CSV</a><a href="/statement2csv/pdf-to-excel/">PDF to Excel</a><a href="/statement2csv/privacy/">Privacy</a></nav></div></header><main class="w"><p class="eb" style="margin-top:34px">Free · runs in your browser</p><h1>Bank Statement PDF to CSV (Free, No Upload)</h1><p class="lede">Open the CSV in any spreadsheet, or use Copy for Excel / Sheets to paste rows directly.</p><div class="card"><label style="display:flex">Statement PDF (text-based)<input type="file" id="f" accept="application/pdf" multiple></label>
+<p><label>Year for dates without one<input id="yr" placeholder="e.g. 2026" style="width:110px"></label> <label>Format<select id="fmt"><option value="g">Date, Description, Amount, Balance</option><option value="q">QuickBooks 3-column (Date, Description, Amount)</option></select></label> <label style="flex-direction:row;gap:6px;align-items:center"><input type="checkbox" id="flip" style="min-width:0">Flip signs (card statements)</label></p>
+<p id="st" class="mut">Choose a PDF. Nothing is uploaded: parsing runs on this page.</p>
+<p><button class="btn" id="dl" disabled>Download CSV</button> <button class="btn" id="cp" disabled style="background:var(--mut)">Copy for Excel / Sheets</button></p></div>
+<div id="sum"></div><div class="tw" id="out"></div>
+<script>// Statement line parser: works on text lines [{text, items}] rebuilt from PDF text positions
+const MON='(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?';
+const DATE_RE=new RegExp('^(\\d{1,2}[/.-]\\d{1,2}(?:[/.-]\\d{2,4})?|\\d{4}-\\d{2}-\\d{2}|\\d{1,2}\\s'+MON+'(?:\\s\\d{2,4})?|'+MON+'\\s\\d{1,2}(?:,?\\s\\d{4})?)(?=\\s|$)','i');
+const AMT_RE=/^(?:\(?-?[$£€]?\d{1,3}(?:,\d{3})*\.\d{2}\)?-?|\(?-?[$£€]?\d+\.\d{2}\)?-?)(?:\s?(?:CR|DR))?$/i;
+function num(t){let s=t.trim(),neg=false;if(/\(.*\)/.test(s))neg=true;if(/-$/.test(s)||/^-|^\(?-/.test(s))neg=true;if(/DR$/i.test(s))neg=true;const v=parseFloat(s.replace(/CR|DR/ig,'').replace(/[^0-9.]/g,''));return{v:neg?-v:v,explicit:neg||/CR$/i.test(s)}}
+function linesFromItems(items){ // items: {str,x,y,page}
+ const rows=[];const sorted=items.filter(i=>i.str.trim()).sort((a,b)=>a.page-b.page||b.y-a.y||a.x-b.x);
+ for(const it of sorted){let r=rows.length?rows[rows.length-1]:null;if(!r||r.page!==it.page||Math.abs(r.y-it.y)>2.5){r={page:it.page,y:it.y,items:[]};rows.push(r)}r.items.push(it)}
+ return rows.map(r=>{r.items.sort((a,b)=>a.x-b.x);return r.items.map(i=>i.str.trim()).filter(Boolean)})}
+function parseLines(lines){ // lines: array of token arrays
+ const out=[];let last=null;
+ for(const toks of lines){const line=toks.join(' ').replace(/\s+/g,' ').trim();const m=line.match(DATE_RE);
+  const amts=[];let rest=toks.slice();while(rest.length&&AMT_RE.test(rest[rest.length-1].replace(/\s+/g,' '))){amts.unshift(rest.pop())}
+  if(m&&amts.length){let desc=rest.join(' ').replace(/\s+/g,' ').trim().slice(m[1].length).trim();
+   // drop a second leading date (posting vs transaction date)
+   const m2=desc.match(DATE_RE);let date2=null;if(m2){date2=m2[1];desc=desc.slice(m2[1].length).trim()}
+   const n=amts.map(num);const row={date:m[1],desc,amount:n[0].v,explicit:n[0].explicit,balance:n.length>1?n[n.length-1].v:null};
+   if(n.length===1&&/(opening|beginning|previous|starting)\s+balance|balance\s+(forward|brought)/i.test(desc)){row.balance=n[0].v;row.isBal=true}
+   out.push(row);last=row}
+  else if(last&&!m&&!amts.length&&line.length<80&&!/balance|total|page \d|statement|continued/i.test(line)){last.desc=(last.desc+' '+line).trim()}
+  else last=null}
+ // sign inference from running balance
+ for(let i=1;i<out.length;i++){const p=out[i-1],r=out[i];if(r.balance!=null&&p.balance!=null){const d=Math.round((r.balance-p.balance)*100)/100;if(Math.abs(Math.abs(d)-Math.abs(r.amount))<0.005)r.amount=d;}}
+ return out.filter(r=>!r.isBal)}
+if(typeof module!=='undefined')module.exports={parseLines,linesFromItems,DATE_RE,AMT_RE};
+</script><script type="module">
+import * as pdfjs from '/statement2csv/vendor/pdf.min.mjs';pdfjs.GlobalWorkerOptions.workerSrc='/statement2csv/vendor/pdf.worker.min.mjs';
+let rows=[];const $=id=>document.getElementById(id);
+async function load(files){rows=[];let pages=0;for(const file of files){const doc=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;const items=[];pages+=doc.numPages;
+for(let p=1;p<=doc.numPages;p++){const tc=await (await doc.getPage(p)).getTextContent();for(const i of tc.items)items.push({str:i.str,x:i.transform[4],y:i.transform[5],page:p})}
+if(!items.length){$('st').textContent=file.name+': no text layer found. This looks like a scanned PDF, which is not supported.';continue}
+rows=rows.concat(parseLines(linesFromItems(items)))}
+$('st').textContent=rows.length+' transactions found across '+pages+' page(s). Review before importing.';render()}
+function d(x){const y=$('yr').value.trim();return (/^\d{1,2}[/.-]\d{1,2}$/.test(x)&&y)?x+'/'+y:x}
+function cur(){const f=$('flip').checked?-1:1;return rows.map(r=>({date:d(r.date),desc:r.desc,amount:Math.round(r.amount*f*100)/100,balance:r.balance}))}
+function table(){const q=$('fmt').value==='q';const h=q?['Date','Description','Amount']:['Date','Description','Amount','Balance'];return [h].concat(cur().map(r=>q?[r.date,r.desc.replace(/\d/g,'').replace(/\s+/g,' ').trim(),r.amount.toFixed(2)]:[r.date,r.desc,r.amount.toFixed(2),r.balance==null?'':r.balance.toFixed(2)]))}
+function render(){const t=table(),c=cur();const inn=c.filter(r=>r.amount>0).reduce((a,r)=>a+r.amount,0),out=c.filter(r=>r.amount<0).reduce((a,r)=>a+r.amount,0);
+$('sum').innerHTML=c.length?'<div class="grid"><div class="card"><div class="mut">Rows</div><div class="big">'+c.length+'</div></div><div class="card"><div class="mut">Money in</div><div class="big">'+inn.toFixed(2)+'</div></div><div class="card"><div class="mut">Money out</div><div class="big">'+out.toFixed(2)+'</div><div>Compare with the statement summary</div></div></div>':'';
+$('out').innerHTML='<table><thead><tr>'+t[0].map(h=>'<th style="text-align:left">'+h+'</th>').join('')+'</tr></thead><tbody>'+t.slice(1).map(r=>'<tr>'+r.map(v=>'<td style="text-align:left">'+String(v).replace(/</g,'&lt;')+'</td>').join('')+'</tr>').join('')+'</tbody></table>';$('dl').disabled=$('cp').disabled=!c.length}
+const csv=()=>table().map(r=>r.map(v=>/[",\n]/.test(v)?'"'+String(v).replace(/"/g,'""')+'"':v).join(',')).join('\r\n');
+$('f').onchange=ev=>load([...ev.target.files]).catch(err=>$('st').textContent='Could not read PDF: '+err.message);
+['yr','fmt','flip'].forEach(i=>$(i).addEventListener('input',render));
+$('dl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv()],{type:'text/csv'}));a.download='statement.csv';a.click()};
+$('cp').onclick=()=>navigator.clipboard.writeText(table().map(r=>r.join('\t')).join('\n')).then(()=>$('st').textContent='Copied. Paste into Excel or Google Sheets.');
+</script><h2>How it works</h2><ol><li>pdf.js reads the PDF's text layer in your browser.</li><li>Text is regrouped into lines by position. A line that starts with a date and ends with money amounts becomes a transaction; short lines below it are joined to its description.</li><li>When a running balance is printed, each amount's sign is set from the change in balance, so withdrawals come out negative.</li><li>Opening and previous-balance lines are dropped.</li></ol>
+<h2>Limits</h2><ul><li>Scanned or photographed statements have no text layer and are not supported (no OCR).</li><li>Layouts vary by bank. Check the row count and the money-in / money-out totals against your statement before importing.</li><li>Without a balance column, unsigned amounts stay positive; use Flip signs or fix in your spreadsheet.</li></ul></main>
+<footer><div class="w"><p><b>Statement2CSV</b> converts text-based bank and card statement PDFs to CSV in your browser using Mozilla pdf.js. Files never leave your device. Scanned (image) PDFs are not supported. Always check totals against the statement.</p><p><a href="/statement2csv/about/">Methodology</a> · <a href="/statement2csv/changes/">Change log</a> · <a href="/statement2csv/changes/feed.xml">RSS</a> · <a href="mailto:basileion.ops@gmail.com?subject=Statement2CSV%20correction">Report an error</a></p>
+<p>More free tools: <a href="https://basileion.github.io/txmailcost/">TxMailCost</a> (transactional email API pricing) · <a href="https://basileion.github.io/postgresledger/">PostgresLedger</a> (managed Postgres cost) · <a href="https://basileion.github.io/ai-crawlers/">AI Crawler Rules</a> (AI bot robots.txt checker) · <a href="https://basileion.github.io/a11ycheck/">A11yCheck</a> (WCAG 2.2 checker) · <a href="https://vpsledger.pages.dev/">VPSLedger</a> (VPS true monthly cost) · <a href="https://authcost.pages.dev/">AuthCost</a> (auth pricing by MAU)</p></div></footer></body></html>

@@ -1,0 +1,5 @@
+# Statement2CSV
+> Free in-browser converter from text-based bank statement PDFs to CSV / Excel / QuickBooks 3-column. No upload.
+
+- Converter: https://basileion.github.io/statement2csv/
+- QuickBooks format guide: https://basileion.github.io/statement2csv/quickbooks-csv/ (source: https://quickbooks.intuit.com/learn-support/en-us/help-article/import-transactions/manually-upload-transactions-quickbooks-online/L0rE9OXBz_US_en_US)
